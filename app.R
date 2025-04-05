@@ -26,7 +26,7 @@ ui <- page_navbar(
   
   # Overview of Patient Profile -- demographics, disposition
   nav_panel(
-    title = "Overview",
+    title = "General Overview",
     h2(paste("Study", unique(data$adsl$STUDYID))),
     
     
@@ -100,7 +100,8 @@ ui <- page_navbar(
       nav_panel(
         "Adverse Events Timeline",
         card(
-          card_header("Gantt chart")
+          card_header("AE Timeline"),
+          card_body(plotlyOutput("ae_gantt"))
         )
       ),
       
@@ -122,7 +123,8 @@ server <- function(input,output, session) {
   filtered_adae <- reactive({
     
     req(input$subjectid)
-    data$adae %>% filter(input$subjectid == SUBJID)
+    data$adae %>% 
+      filter(input$subjectid == SUBJID)
     
   })
   
@@ -205,6 +207,53 @@ server <- function(input,output, session) {
     paste(last(filtered_adae()$DCSREAS))
   })
   
+  
+  # Gantt chart
+  output$ae_gantt <- renderPlotly({
+    
+    data_plot <- filtered_adae() %>% 
+      mutate(ASTDTM = as.Date(ASTDTM, format = "%m/%d/%Y"),
+             AENDTM = as.Date(AENDTM, format = "%m/%d/%Y"))
+    
+    fig <- plot_ly()
+    
+    color_mapping <- c("1" = "green",
+                       "2" = "yellow",
+                       "3" = "orange",
+                       "4" = "red",
+                       "5" = "darkred")
+    
+    fig <- plot_ly()
+    
+    for(i in 1:(nrow(data_plot) - 1)) {
+      fig <- add_trace(fig,
+                       x = c(data_plot$ASTDTM[i], data_plot$AENDTM[i]),
+                       y = c(i, i),
+                       mode = "lines",
+                       line = list(width = 30,
+                                   color = color_mapping[as.character(data_plot$AETOXGR[i])]),
+                       showlegend = FALSE,
+                       hoverinfo = "text",
+                       # Custom hover text
+                       text = paste("Adverse Event:", data_plot$AETERM[i], "<br>",
+                                    "Severity:", data_plot$AESEV[i], "<br>",
+                                    "Grade:", data_plot$AETOXGR[i], "<br>",
+                                    "Duration:", data_plot$AENDTM[i] - data_plot$ASTDTM[i]),
+                       evaluate = TRUE
+      )
+    }
+    
+    fig <- layout(
+      fig,
+      yaxis = (list(showgrid = FALSE,
+                    tickmode = "array",
+                    tickvals = 1:nrow(data_plot),
+                    ticktext = unique(data_plot$AETERM)))
+    )
+    
+    fig
+    
+  })
 }
 
 
