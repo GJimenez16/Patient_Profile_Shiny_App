@@ -69,14 +69,31 @@ ui <- page_navbar(
       
       nav_panel(
         "Overview",
-        card(
-          card_header("Age, sex, race")
+        
+        layout_column_wrap(
+          value_box(title = "Age", 
+                    value = textOutput("patient_age")),
+          value_box(title = "Sex", 
+                    value = textOutput("patient_sex")),
+          value_box(title = "Race", 
+                    value = textOutput("patient_race"))
         ),
-        card(
-          card_header("Disposition, start/end date")
+        
+        layout_column_wrap(
+          value_box(title = "Date of first exposure to treatment (dd-mm-yyyy)", 
+                    value = textOutput("patient_trtsdtm")),
+          value_box(title = "Date of last exposure to treatment (dd-mm-yyyy)", 
+                    value = textOutput("patient_trtedtm")),
+          value_box(title = "End of Study Status", 
+                    value = textOutput("patient_eosstt")),
+          value_box(title = "Reason for Discontinuation", 
+                    value = textOutput("patient_dcsreas"))
+          
         ),
+        
         card(
-          card_header("Key flags")
+          card_header("Adverse Events"),
+          card_body(DTOutput("ae_table"))
         )
       ),
       
@@ -102,6 +119,14 @@ ui <- page_navbar(
 
 server <- function(input,output, session) {
   
+  filtered_adae <- reactive({
+    
+    req(input$subjectid)
+    data$adae %>% filter(input$subjectid == SUBJID)
+    
+  })
+  
+  # General Overview panel
   output$agedist <- renderPlotly({
     
     fig <- plot_ly(
@@ -131,6 +156,55 @@ server <- function(input,output, session) {
         yaxis = list(title = "")
       )
   })
+  
+  
+  # Patient Overview panel
+  output$ae_table <- renderDT({
+
+    filtered_adae() %>%
+      select(SUBJID,
+             TRT01SDTM,
+             TRT02SDTM,
+             AETERM,
+             AETOXGR,
+             AESEV,
+             AEACN,
+             AEOUT,
+             ASTDY,
+             AENDY,
+             AERELNST,
+             AEACNOTH
+             )
+  })
+  
+  output$patient_age <- renderText({
+    paste(last(filtered_adae()$AGE))
+  })
+  
+  output$patient_sex <- renderText({
+    paste(last(filtered_adae()$SEX))
+  })
+  
+  output$patient_race <- renderText({
+    paste(last(filtered_adae()$RACE))
+  })
+  
+  output$patient_trtsdtm <- renderText({
+    paste(format(last(filtered_adae()$TRTSDTM), "%d-%m-%Y"))
+  })
+  
+  output$patient_trtedtm <- renderText({
+    paste(format(last(filtered_adae()$TRTEDTM), "%d-%m-%Y"))
+  })
+  
+  output$patient_eosstt <- renderText({
+    paste(last(filtered_adae()$EOSSTT))
+  })
+  
+  output$patient_dcsreas <- renderText({
+    paste(last(filtered_adae()$DCSREAS))
+  })
+  
 }
 
 
