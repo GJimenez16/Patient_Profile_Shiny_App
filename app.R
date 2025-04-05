@@ -208,50 +208,74 @@ server <- function(input,output, session) {
   })
   
   
-  # Gantt chart
+  # Gantt chart -- TODO: 2 events for the same AETERM issue
   output$ae_gantt <- renderPlotly({
     
     data_plot <- filtered_adae() %>% 
       mutate(ASTDTM = as.Date(ASTDTM, format = "%m/%d/%Y"),
              AENDTM = as.Date(AENDTM, format = "%m/%d/%Y"))
     
-    fig <- plot_ly()
-    
-    color_mapping <- c("1" = "green",
-                       "2" = "yellow",
-                       "3" = "orange",
-                       "4" = "red",
-                       "5" = "darkred")
-    
-    fig <- plot_ly()
-    
-    for(i in 1:(nrow(data_plot) - 1)) {
-      fig <- add_trace(fig,
-                       x = c(data_plot$ASTDTM[i], data_plot$AENDTM[i]),
-                       y = c(i, i),
-                       mode = "lines",
-                       line = list(width = 30,
-                                   color = color_mapping[as.character(data_plot$AETOXGR[i])]),
-                       showlegend = FALSE,
-                       hoverinfo = "text",
-                       # Custom hover text
-                       text = paste("Adverse Event:", data_plot$AETERM[i], "<br>",
-                                    "Severity:", data_plot$AESEV[i], "<br>",
-                                    "Grade:", data_plot$AETOXGR[i], "<br>",
-                                    "Duration:", data_plot$AENDTM[i] - data_plot$ASTDTM[i]),
-                       evaluate = TRUE
+    if(nrow(data_plot) == 0) {
+      
+      return(
+        plot_ly() %>% 
+          add_annotations(
+            text = "No adverse events data available for this subject",
+            x = 0.5,
+            y = 0.5,
+            xref = "paper",
+            yref = "paper",
+            showarrow = FALSE,
+            font = list(size = 20)
+          ) %>%
+          layout(
+            xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+            yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE)
+          )
       )
-    }
+      
+    } else {
+      
+      fig <- plot_ly()
+      
+      color_mapping <- c("1" = "green",
+                         "2" = "yellow",
+                         "3" = "orange",
+                         "4" = "red",
+                         "5" = "darkred")
+      
+      fig <- plot_ly()
+      
+      for(i in 1:(nrow(data_plot) - 1)) {
+        fig <- add_trace(fig,
+                         x = c(data_plot$ASTDTM[i], data_plot$AENDTM[i]),
+                         y = c(i, i),
+                         mode = "lines",
+                         line = list(width = 50,
+                                     color = color_mapping[as.character(data_plot$AETOXGR[i])]),
+                         showlegend = FALSE,
+                         hoverinfo = "text",
+                         # Custom hover text
+                         text = paste("Adverse Event:", data_plot$AETERM[i], "<br>",
+                                      "Severity:", data_plot$AESEV[i], "<br>",
+                                      "Grade:", data_plot$AETOXGR[i], "<br>",
+                                      "Duration:", data_plot$AENDTM[i] - data_plot$ASTDTM[i]),
+                         evaluate = TRUE
+        )
+      }
+      
+      fig <- layout(
+        fig,
+        yaxis = (list(showgrid = FALSE,
+                      tickmode = "array",
+                      tickvals = 1:nrow(data_plot),
+                      ticktext = unique(data_plot$AETERM)))
+      )
+      
+      fig
+    } 
     
-    fig <- layout(
-      fig,
-      yaxis = (list(showgrid = FALSE,
-                    tickmode = "array",
-                    tickvals = 1:nrow(data_plot),
-                    ticktext = unique(data_plot$AETERM)))
-    )
     
-    fig
     
   })
 }
