@@ -1,6 +1,7 @@
 library(shiny)
 library(bslib)
 library(bsicons)
+library(shinyWidgets)
 library(dplyr)
 library(DT)
 library(future)
@@ -9,21 +10,15 @@ library(random.cdisc.data)
 library(plotly)
 
 
-
-# Random adam datasets
-data <- list(
-  adsl = random.cdisc.data::cadsl,
-  adae = random.cdisc.data::cadae,
-  adlb = random.cdisc.data::cadlb,
-  advs = random.cdisc.data::cadvs
-)
-
-
+source("R/mod_valuebox.R")
+source("R/plots.R")
 
 ui <- page_navbar(
   
   title = "Patient Profile",
-  
+  theme = bs_theme(version = 5, 
+                   preset = "shiny"
+                   ),
   # Overview of Patient Profile -- demographics, disposition
   nav_panel(
     title = "General Overview",
@@ -31,17 +26,9 @@ ui <- page_navbar(
     
     
     layout_column_wrap(
-      value_box(title = "Total Patients", 
-                value = n_distinct(data$adsl$USUBJID),
-                showcase = bs_icon("person-standing")),
-      
-      value_box(title = "Completed treatments", 
-                value = nrow(subset(data$adsl, EOSSTT == "COMPLETED")),
-                showcase = bs_icon("check-circle-fill")),
-      
-      value_box(title = "On going treatments", 
-                value = nrow(subset(data$adsl, EOSSTT == "ONGOING")),
-                showcase = bs_icon("clipboard2-pulse-fill"))
+      mod_valuebox_ui("vb_total_patients"),
+      mod_valuebox_ui("vb_completed_tr"),
+      mod_valuebox_ui("vb_ongoing_tr")
     ),
     
     card(
@@ -71,24 +58,16 @@ ui <- page_navbar(
         "Overview",
         
         layout_column_wrap(
-          value_box(title = "Age", 
-                    value = textOutput("patient_age")),
-          value_box(title = "Sex", 
-                    value = textOutput("patient_sex")),
-          value_box(title = "Race", 
-                    value = textOutput("patient_race"))
+          mod_valuebox_ui("patient_age", has_icon = FALSE),
+          mod_valuebox_ui("patient_sex", has_icon = FALSE),
+          mod_valuebox_ui("patient_race", has_icon = FALSE)
         ),
         
         layout_column_wrap(
-          value_box(title = "Date of first exposure to treatment (dd-mm-yyyy)", 
-                    value = textOutput("patient_trtsdtm")),
-          value_box(title = "Date of last exposure to treatment (dd-mm-yyyy)", 
-                    value = textOutput("patient_trtedtm")),
-          value_box(title = "End of Study Status", 
-                    value = textOutput("patient_eosstt")),
-          value_box(title = "Reason for Discontinuation", 
-                    value = textOutput("patient_dcsreas"))
-          
+          mod_valuebox_ui("patient_trtsdtm", has_icon = FALSE),
+          mod_valuebox_ui("patient_trtedtm", has_icon = FALSE),
+          mod_valuebox_ui("patient_eosstt", has_icon = FALSE),
+          mod_valuebox_ui("patient_dcsreas", has_icon = FALSE)
         ),
         
         card(
@@ -108,10 +87,41 @@ ui <- page_navbar(
       nav_panel(
         "Labs",
         layout_sidebar(
+          fill = FALSE,
+          
           sidebar = sidebar(
-            selectInput("labfilter", "Choose labs", choices = data$adlb$LBTEST, multiple = TRUE)
+            pickerInput("labfilter", "Choose labs", 
+                        choices = unique(data$adlb$LBTEST), 
+                        selected = unique(data$adlb$LBTEST),
+                        options = pickerOptions(actionsBox = TRUE),
+                        multiple = TRUE)
           ),
-          plotOutput("labplot")
+          
+          card(
+            card_header("Timeline"),
+            card_body(plotlyOutput("lab_plot"))
+          ),
+          
+          card(
+            card_header("Complete lab data"),
+            card_body(DTOutput("lab_table"))
+          ),
+        )
+      )
+    )
+  ),
+  
+  nav_panel(
+    "eNotes",
+    h2("eNotes"),
+    
+    card(
+      card_body(
+        h2("Still in development"),
+        DTOutput("eNote_table"),
+        layout_column_wrap(
+          actionButton("save", "Save Changes"),
+          actionButton("download", "Download eNotes")
         )
       )
     )
@@ -127,157 +137,95 @@ server <- function(input,output, session) {
       filter(input$subjectid == SUBJID)
     
   })
+  filtered_adlb <- reactive({
+    data$adlb %>% 
+      filter(LBTEST %in% input$labfilter,
+             SUBJID == filtered_adae()$SUBJID)
+  })
   
   # General Overview panel
+  
+  mod_valuebox_server("vb_total_patients", "Total Patients", n_distinct(data$adsl$USUBJID), "person-standing")
+  mod_valuebox_server("vb_completed_tr", title = "Completed treatments", value = nrow(subset(data$adsl, EOSSTT == "COMPLETED")), icon = "check-circle-fill")
+  mod_valuebox_server("vb_ongoing_tr", "On going treatments", nrow(subset(data$adsl, EOSSTT == "ONGOING")), "clipboard2-pulse-fill")
+  
   output$agedist <- renderPlotly({
-    
-    fig <- plot_ly(
-      data$adsl,
-      x = ~AGE,
-      color = ~SEX,
-      type = "histogram"
-    ) %>% 
-      layout(
-        xaxis = list(title = "Age"),
-        yaxis = list(title = "Count"),
-        barmode = "stack"
-      )
-    
+    agedist_plot
   })
   
   output$racedist <- renderPlotly({
-    
-    fig <- plot_ly(
-      data$adsl,
-      y = ~RACE,
-      type = "histogram",
-      orientation = "h"
-    ) %>% 
-      layout(
-        xaxis = list(title = ""),
-        yaxis = list(title = "")
-      )
+    racedist_plot
   })
   
   
   # Patient Overview panel
   output$ae_table <- renderDT({
+    datatable(
+      filtered_adae() %>%
+        select(SUBJID,
+               TRT01SDTM,
+               TRT02SDTM,
+               AETERM,
+               AETOXGR,
+               AESEV,
+               AEACN,
+               AEOUT,
+               ASTDY,
+               AENDY,
+               AERELNST,
+               AEACNOTH
+        ),
+      filter = "top"
+    )
+  })
+  
+  mod_valuebox_server("patient_age",title = "Age", value = paste(last(filtered_adae()$AGE)))
+  
+  mod_valuebox_server("patient_sex", title = "Sex", value = paste(last(filtered_adae()$SEX)))
+  
+  mod_valuebox_server("patient_race", title = "Race", value = paste(last(filtered_adae()$RACE)))
+  
+  mod_valuebox_server("patient_trtsdtm", title = "Date of first exposure to treatment (dd-mm-yyyy)", value = paste(format(last(filtered_adae()$TRTSDTM), "%d-%m-%Y")))
+  
+  mod_valuebox_server("patient_trtedtm", title = "Date of last exposure to treatment (dd-mm-yyyy)", value = paste(format(last(filtered_adae()$TRTEDTM), "%d-%m-%Y")))
+  
+  mod_valuebox_server("patient_eosstt", title = "End of Study Status", value = paste(last(filtered_adae()$EOSSTT)))
+  
+  mod_valuebox_server("patient_dcsreas", "Reason of Discontinuation", value = paste(last(filtered_adae()$DCSREAS)))
 
-    filtered_adae() %>%
-      select(SUBJID,
-             TRT01SDTM,
-             TRT02SDTM,
-             AETERM,
-             AETOXGR,
-             AESEV,
-             AEACN,
-             AEOUT,
-             ASTDY,
-             AENDY,
-             AERELNST,
-             AEACNOTH
-             )
-  })
-  
-  output$patient_age <- renderText({
-    paste(last(filtered_adae()$AGE))
-  })
-  
-  output$patient_sex <- renderText({
-    paste(last(filtered_adae()$SEX))
-  })
-  
-  output$patient_race <- renderText({
-    paste(last(filtered_adae()$RACE))
-  })
-  
-  output$patient_trtsdtm <- renderText({
-    paste(format(last(filtered_adae()$TRTSDTM), "%d-%m-%Y"))
-  })
-  
-  output$patient_trtedtm <- renderText({
-    paste(format(last(filtered_adae()$TRTEDTM), "%d-%m-%Y"))
-  })
-  
-  output$patient_eosstt <- renderText({
-    paste(last(filtered_adae()$EOSSTT))
-  })
-  
-  output$patient_dcsreas <- renderText({
-    paste(last(filtered_adae()$DCSREAS))
-  })
   
   
   # Gantt chart -- TODO: 2 events for the same AETERM issue
   output$ae_gantt <- renderPlotly({
-    
-    data_plot <- filtered_adae() %>% 
-      mutate(ASTDTM = as.Date(ASTDTM, format = "%m/%d/%Y"),
-             AENDTM = as.Date(AENDTM, format = "%m/%d/%Y"))
-    
-    if(nrow(data_plot) == 0) {
-      
-      return(
-        plot_ly() %>% 
-          add_annotations(
-            text = "No adverse events data available for this subject",
-            x = 0.5,
-            y = 0.5,
-            xref = "paper",
-            yref = "paper",
-            showarrow = FALSE,
-            font = list(size = 20)
-          ) %>%
-          layout(
-            xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
-            yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE)
-          )
-      )
-      
-    } else {
-      
-      fig <- plot_ly()
-      
-      color_mapping <- c("1" = "green",
-                         "2" = "yellow",
-                         "3" = "orange",
-                         "4" = "red",
-                         "5" = "darkred")
-      
-      fig <- plot_ly()
-      
-      for(i in 1:(nrow(data_plot) - 1)) {
-        fig <- add_trace(fig,
-                         x = c(data_plot$ASTDTM[i], data_plot$AENDTM[i]),
-                         y = c(i, i),
-                         mode = "lines",
-                         line = list(width = 50,
-                                     color = color_mapping[as.character(data_plot$AETOXGR[i])]),
-                         showlegend = FALSE,
-                         hoverinfo = "text",
-                         # Custom hover text
-                         text = paste("Adverse Event:", data_plot$AETERM[i], "<br>",
-                                      "Severity:", data_plot$AESEV[i], "<br>",
-                                      "Grade:", data_plot$AETOXGR[i], "<br>",
-                                      "Duration:", data_plot$AENDTM[i] - data_plot$ASTDTM[i]),
-                         evaluate = TRUE
-        )
-      }
-      
-      fig <- layout(
-        fig,
-        yaxis = (list(showgrid = FALSE,
-                      tickmode = "array",
-                      tickvals = 1:nrow(data_plot),
-                      ticktext = unique(data_plot$AETERM)))
-      )
-      
-      fig
-    } 
-    
-    
-    
+    ae_gantt_plot(filtered_adae())
   })
+  
+  
+  # Lab tab
+  output$lab_plot <- renderPlotly({
+    labs_plot(filtered_adlb()) 
+  })
+  
+  output$lab_table <- renderDT({
+    
+    datatable(
+      filtered_adlb() %>% 
+            select(SUBJID,
+                   LBTEST, 
+                   LBCAT, 
+                   AVAL, 
+                   AVALU, 
+                   BASE, 
+                   CHG2,
+                   ANRIND, 
+                   ADTM, 
+                   ADY, 
+                   ANRLO, 
+                   ANRHI),
+      filter = "top"
+    ) 
+  })
+  
 }
 
 
