@@ -31,18 +31,3 @@ renv::restore()
 
 # Run the app
 shiny::runApp()
-
-
-
-
-├── app.R
-├── global.R
-├── R/
-│   ├── mod_valuebox.R
-│   ├── mod_table.R
-│   └── helpers.R
-├── data/
-│   └── clinical_data.rds
-├── www/
-│   └── custom.css
-└── README.md
