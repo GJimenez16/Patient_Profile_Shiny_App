@@ -8,10 +8,22 @@ library(future)
 library(promises)
 library(random.cdisc.data)
 library(plotly)
+library(RMySQL)
+
+# Enable multi-session (parallel execution)
+plan(multisession)
 
 
-source("R/mod_valuebox.R")
-source("R/plots.R")
+# Pull data 
+sapply(list.files("data/", pattern = "\\.R$", full.names = TRUE), source)
+
+# Pull modules and plots needed in the app
+sapply(list.files("R/", pattern = "\\.R$", full.names = TRUE), source)
+
+
+################################################################################
+# UI
+################################################################################
 
 ui <- page_navbar(
   
@@ -40,11 +52,8 @@ ui <- page_navbar(
       card_header("Race Distribution"),
       card_body(plotlyOutput("racedist"))
     )
-    
-    
-    
-    
   ),
+  
   
   # Tab for deeper dive by selecting one patient
   nav_panel(
@@ -117,16 +126,20 @@ ui <- page_navbar(
     
     card(
       card_body(
-        h2("Still in development"),
         DTOutput("eNote_table"),
         layout_column_wrap(
-          actionButton("save", "Save Changes"),
-          actionButton("download", "Download eNotes")
+          actionButton("add_row", "Add New Row", icon = icon("square-plus")),
+          actionButton("save_db", "Save Changes", icon = icon("floppy-disk")),
+          downloadButton("download", "Download eNotes", icon = icon("download"))
         )
       )
     )
   )
 )
+
+################################################################################
+# Server
+################################################################################
 
 server <- function(input,output, session) {
   
@@ -142,8 +155,11 @@ server <- function(input,output, session) {
       filter(LBTEST %in% input$labfilter,
              SUBJID == filtered_adae()$SUBJID)
   })
+  db_table <- reactiveVal(enotes)
   
+  ##############################################################################
   # General Overview panel
+  ##############################################################################
   
   mod_valuebox_server("vb_total_patients", "Total Patients", n_distinct(data$adsl$USUBJID), "person-standing")
   mod_valuebox_server("vb_completed_tr", title = "Completed treatments", value = nrow(subset(data$adsl, EOSSTT == "COMPLETED")), icon = "check-circle-fill")
@@ -152,13 +168,23 @@ server <- function(input,output, session) {
   output$agedist <- renderPlotly({
     agedist_plot
   })
-  
   output$racedist <- renderPlotly({
     racedist_plot
   })
   
-  
+  ##############################################################################
   # Patient Overview panel
+  ##############################################################################
+  
+  ### First tab
+  mod_valuebox_server("patient_age",title = "Age", value = paste(last(filtered_adae()$AGE)))
+  mod_valuebox_server("patient_sex", title = "Sex", value = paste(last(filtered_adae()$SEX)))
+  mod_valuebox_server("patient_race", title = "Race", value = paste(last(filtered_adae()$RACE)))
+  mod_valuebox_server("patient_trtsdtm", title = "Date of first exposure to treatment (dd-mm-yyyy)", value = paste(format(last(filtered_adae()$TRTSDTM), "%d-%m-%Y")))
+  mod_valuebox_server("patient_trtedtm", title = "Date of last exposure to treatment (dd-mm-yyyy)", value = paste(format(last(filtered_adae()$TRTEDTM), "%d-%m-%Y")))
+  mod_valuebox_server("patient_eosstt", title = "End of Study Status", value = paste(last(filtered_adae()$EOSSTT)))
+  mod_valuebox_server("patient_dcsreas", "Reason of Discontinuation", value = paste(last(filtered_adae()$DCSREAS)))
+  
   output$ae_table <- renderDT({
     datatable(
       filtered_adae() %>%
@@ -179,35 +205,16 @@ server <- function(input,output, session) {
     )
   })
   
-  mod_valuebox_server("patient_age",title = "Age", value = paste(last(filtered_adae()$AGE)))
-  
-  mod_valuebox_server("patient_sex", title = "Sex", value = paste(last(filtered_adae()$SEX)))
-  
-  mod_valuebox_server("patient_race", title = "Race", value = paste(last(filtered_adae()$RACE)))
-  
-  mod_valuebox_server("patient_trtsdtm", title = "Date of first exposure to treatment (dd-mm-yyyy)", value = paste(format(last(filtered_adae()$TRTSDTM), "%d-%m-%Y")))
-  
-  mod_valuebox_server("patient_trtedtm", title = "Date of last exposure to treatment (dd-mm-yyyy)", value = paste(format(last(filtered_adae()$TRTEDTM), "%d-%m-%Y")))
-  
-  mod_valuebox_server("patient_eosstt", title = "End of Study Status", value = paste(last(filtered_adae()$EOSSTT)))
-  
-  mod_valuebox_server("patient_dcsreas", "Reason of Discontinuation", value = paste(last(filtered_adae()$DCSREAS)))
-
-  
-  
-  # Gantt chart -- TODO: 2 events for the same AETERM issue
+  ### Gantt chart -- TODO: 2 events for the same AETERM issue
   output$ae_gantt <- renderPlotly({
     ae_gantt_plot(filtered_adae())
   })
   
-  
-  # Lab tab
+  ### Lab tab
   output$lab_plot <- renderPlotly({
     labs_plot(filtered_adlb()) 
   })
-  
   output$lab_table <- renderDT({
-    
     datatable(
       filtered_adlb() %>% 
             select(SUBJID,
@@ -226,7 +233,95 @@ server <- function(input,output, session) {
     ) 
   })
   
+  ##############################################################################
+  # eNotes panel
+  ##############################################################################
+  
+  # eNotes DT
+  output$eNote_table <- renderDT({
+    datatable(
+      db_table() %>% select(-row_names),
+      filter = "top"
+    )
+  })
+  
+  ### Buttons functionality
+  # Dispay popup when user hits "add row"
+  observe({
+    showModal(
+      modalDialog(
+        paste0("User:", Sys.info()["user"],
+               "\n",
+               "Date:", Sys.Date()),
+        selectInput("select_patient", "Select Patient:", choices = unique(data$adsl$SUBJID)),
+        selectInput("select_adam", "Select ADaM:", choices = names(data)),
+        textInput("note", "Write Note"),
+        footer = tagList(
+          modalButton("Cancel"),
+          actionButton("confirm_add", "Add Row")
+        )
+      )
+    )
+  }) %>% bindEvent(input$add_row)
+  
+  # Adding the new row to the db table
+  observe({
+    browser()
+    # Storing the new row
+    new_row <- data.frame(
+      row_names = max(as.numeric(db_table()$row_names)) + 1,
+      User = Sys.info()["user"],
+      Date = Sys.Date(),
+      Patient = input$select_patient,
+      ADaM = input$select_adam,
+      Comment = input$note,
+      stringsAsFactors = FALSE
+    )
+    
+    # Binding the new row with the db table
+    db_table(rbind(db_table(), new_row))
+    removeModal()
+  }) %>% bindEvent(input$confirm_add)
+  
+  # Writing back to the database
+  observe({
+    browser()
+    con <-  dbConnect(MySQL(), 
+                      user = db_user, 
+                      password = db_password,
+                      dbname = db_name, 
+                      host = db_host, 
+                      port = db_port)
+    
+    future_promise({
+      dbWriteTable(
+        conn = con,
+        name = "eNotes",  # replace with your desired table name
+        value = db_table() %>% select(-row_names),
+        overwrite = TRUE,          # will drop table if it exists and recreate
+        field.types = NULL        # let R determine column types automatically
+      )
+    }) %...>% {
+      showNotification("Data saved to the database!", 
+                       type = "message")
+    } %...!% {
+      showNotification(paste("Error:", .), 
+                       type = "error")
+       }
+      
+  }) %>% bindEvent(input$save_db)
+  
+  # Downloading eNotes as a csv
+  output$download <- downloadHandler(
+    filename = function() {
+      paste0("notes_", Sys.Date(), ".csv")
+    },
+    content = function(file) {
+      write.csv(db_table() %>% select(-row_names), file, row.names = FALSE)
+    }
+  )
 }
 
 
 shinyApp(ui, server)
+
