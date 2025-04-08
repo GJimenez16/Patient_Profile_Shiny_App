@@ -9,6 +9,8 @@ library(promises)
 library(random.cdisc.data)
 library(plotly)
 library(RMySQL)
+library(pool)
+
 
 # Enable multi-session (parallel execution)
 plan(multisession)
@@ -248,6 +250,7 @@ server <- function(input,output, session) {
   ### Buttons functionality
   # Dispay popup when user hits "add row"
   observe({
+    
     showModal(
       modalDialog(
         paste0("User:", Sys.info()["user"],
@@ -266,16 +269,16 @@ server <- function(input,output, session) {
   
   # Adding the new row to the db table
   observe({
-    browser()
+    
     # Storing the new row
     new_row <- data.frame(
       row_names = max(as.numeric(db_table()$row_names)) + 1,
-      User = Sys.info()["user"],
+      User = as.character(Sys.info()["user"]),
       Date = Sys.Date(),
       Patient = input$select_patient,
       ADaM = input$select_adam,
       Comment = input$note,
-      stringsAsFactors = FALSE
+      row.names = NULL
     )
     
     # Binding the new row with the db table
@@ -285,21 +288,25 @@ server <- function(input,output, session) {
   
   # Writing back to the database
   observe({
-    browser()
-    con <-  dbConnect(MySQL(), 
-                      user = db_user, 
-                      password = db_password,
-                      dbname = db_name, 
-                      host = db_host, 
-                      port = db_port)
+    
+    # Define df outside future_promise because reactives only lives inside shiny
+    final_df <- db_table() %>% select(-row_names)
     
     future_promise({
-      dbWriteTable(
+      con2 <-  dbConnect(MySQL(), 
+                         user = db_user, 
+                         password = db_password,
+                         dbname = db_name, 
+                         host = db_host, 
+                         port = db_port)
+      
+      on.exit(DBI::dbDisconnect(con2), add = TRUE)  
+      
+      DBI::dbWriteTable(
         conn = con,
-        name = "eNotes",  # replace with your desired table name
-        value = db_table() %>% select(-row_names),
-        overwrite = TRUE,          # will drop table if it exists and recreate
-        field.types = NULL        # let R determine column types automatically
+        name = "eNotes", 
+        value = final_df,
+        overwrite = TRUE         
       )
     }) %...>% {
       showNotification("Data saved to the database!", 
