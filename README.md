@@ -10,10 +10,10 @@ The app leverages:
 - `{shiny}` modules for reusable components
 - `{DT}` for interactive tables
 - `{tidyverse}` for data manipulation
+- `{future}` & `{promises}` for Async programming 
 
 ---
 
-## App Structure
 
 ### Modules
 
